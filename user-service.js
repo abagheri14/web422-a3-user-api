@@ -24,9 +24,7 @@ function connect() {
     });
 }
 
-// Register a new user
 function registerUser(userData) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       if (!userData.userName || !userData.password || !userData.password2) {
@@ -64,9 +62,7 @@ function registerUser(userData) {
   });
 }
 
-// Check user login
 function checkUser(loginData) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       if (!loginData.userName || !loginData.password) {
@@ -84,7 +80,6 @@ function checkUser(loginData) {
               .compare(loginData.password, user.password)
               .then((result) => {
                 if (result) {
-                  // Return full user doc so server.js can build JWT payload
                   resolve(user);
                 } else {
                   reject("Incorrect password.");
@@ -100,15 +95,12 @@ function checkUser(loginData) {
 }
 
 function getUserById(id) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return User.findById(id).exec();
   });
 }
 
-// Favourites operations use JWT-authenticated user
 function getFavourites(userId) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       User.findById(userId)
@@ -128,7 +120,6 @@ function getFavourites(userId) {
 }
 
 function addFavourite(userId, bookId) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       User.findById(userId)
@@ -150,7 +141,6 @@ function addFavourite(userId, bookId) {
 }
 
 function removeFavourite(userId, bookId) {
-  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       User.findById(userId)
