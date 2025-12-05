@@ -1,77 +1,121 @@
-import express from "express";
-import dotenv from "dotenv";
-import cors from "cors";
-import passport from "passport";
-import userService from "./user-service.js";
-import "./auth/passport.js";
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const passport = require("passport");
+const jwt = require("jsonwebtoken");
+const userService = require("./user-service.js");
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const HTTP_PORT = process.env.PORT || 8080;
+
 app.use(express.json());
+app.use(cors());
 app.use(passport.initialize());
 
-const PORT = process.env.PORT || 8080;
+// Initialize passport JWT strategy
+require("./auth/passport.js")(passport);
 
-// Register Route
-app.post("/api/user/register", async (req, res) => {
-  try {
-    const result = await userService.registerUser(req.body);
-    res.status(200).json(result);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
+// POST /api/user/register
+app.post("/api/user/register", (req, res) => {
+  userService
+    .registerUser(req.body)
+    .then((msg) => {
+      res.json({ message: msg });
+    })
+    .catch((msg) => {
+      res.status(422).json({ message: msg });
+    });
 });
 
-// Login Route
-app.post("/api/user/login", async (req, res) => {
-  try {
-    const result = await userService.checkUser(req.body);
-    res.status(200).json(result);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
+// POST /api/user/login
+app.post("/api/user/login", (req, res) => {
+  userService
+    .checkUser(req.body)
+    .then((user) => {
+      // Build JWT payload with _id and userName (as per PDF)
+      const payload = {
+        _id: user._id,
+        userName: user.userName
+      };
+
+      const token = jwt.sign(payload, process.env.JWT_SECRET, {
+        expiresIn: "2h"
+      });
+
+      res.json({ message: "login successful", token });
+    })
+    .catch((msg) => {
+      res.status(422).json({ message: msg });
+    });
 });
 
-// Protected Route Example
+// PROTECTED routes: favourites
+// GET /api/user/favourites
 app.get(
   "/api/user/favourites",
   passport.authenticate("jwt", { session: false }),
-  async (req, res) => {
-    try {
-      const result = await userService.getFavourites(req.user.userName);
-      res.status(200).json(result);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
+  (req, res) => {
+    userService
+      .getFavourites(req.user._id)
+      .then((data) => {
+        res.json(data);
+      })
+      .catch((msg) => {
+        res.status(422).json({ message: msg });
+      });
   }
 );
 
-app.post(
-  "/api/user/favourites",
+// PUT /api/user/favourites/:id  (add favourite)
+app.put(
+  "/api/user/favourites/:id",
   passport.authenticate("jwt", { session: false }),
-  async (req, res) => {
-    try {
-      const result = await userService.addFavourite(req.user.userName, req.body.id);
-      res.status(200).json(result);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
+  (req, res) => {
+    userService
+      .addFavourite(req.user._id, req.params.id)
+      .then((data) => {
+        res.json(data);
+      })
+      .catch((msg) => {
+        res.status(422).json({ message: msg });
+      });
   }
 );
 
+// DELETE /api/user/favourites/:id
 app.delete(
   "/api/user/favourites/:id",
   passport.authenticate("jwt", { session: false }),
-  async (req, res) => {
-    try {
-      const result = await userService.removeFavourite(req.user.userName, req.params.id);
-      res.status(200).json(result);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
+  (req, res) => {
+    userService
+      .removeFavourite(req.user._id, req.params.id)
+      .then((data) => {
+        res.json(data);
+      })
+      .catch((msg) => {
+        res.status(422).json({ message: msg });
+      });
   }
 );
 
-app.listen(PORT, () => console.log(`User API running on port ${PORT}`));
+// --- Startup for local DEV + export for Vercel --- //
+
+userService
+  .connect()
+  .then(() => {
+    // Only listen when run directly (local dev)
+    if (require.main === module) {
+      app.listen(HTTP_PORT, () => {
+        console.log("API listening on: " + HTTP_PORT);
+      });
+    }
+  })
+  .catch((err) => {
+    console.log("unable to start the server: " + err);
+    process.exit();
+  });
+
+// Export the app for Vercel (@vercel/node)
+module.exports = app;

@@ -1,150 +1,161 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
-let mongoDBConnectionString = process.env.MONGO_URL;
+let User; // Mongoose model
 
-let Schema = mongoose.Schema;
+function connect() {
+  if (User) {
+    return Promise.resolve();
+  }
 
-let userSchema = new Schema({
-    userName: {
-        type: String,
-        unique: true
-    },
-    password: String,
-    favourites: [String]
-});
+  return mongoose
+    .connect(process.env.MONGO_URL)
+    .then(() => {
+      const Schema = mongoose.Schema;
 
-let User;
+      const userSchema = new Schema({
+        userName: { type: String, unique: true },
+        email: String,
+        password: String,
+        favourites: [String]
+      });
 
-module.exports.connect = function () {
-    return new Promise(function (resolve, reject) {
-        let db = mongoose.createConnection(mongoDBConnectionString);
-
-        db.on('error', err => {
-            reject(err);
-        });
-
-        db.once('open', () => {
-            User = db.model("users", userSchema);
-            resolve();
-        });
+      User = mongoose.models.User || mongoose.model("User", userSchema);
     });
-};
+}
 
-module.exports.registerUser = function (userData) {
-    return new Promise(function (resolve, reject) {
+// Register a new user
+function registerUser(userData) {
+  return new Promise((resolve, reject) => {
+    if (!userData.userName || !userData.password || !userData.password2) {
+      reject("userName, password, and password2 are all required.");
+      return;
+    }
 
-        if (userData.password != userData.password2) {
-            reject("Passwords do not match");
+    if (userData.password !== userData.password2) {
+      reject("Passwords do not match.");
+      return;
+    }
+
+    bcrypt
+      .hash(userData.password, 10)
+      .then((hash) => {
+        const newUser = new User({
+          userName: userData.userName,
+          email: userData.email || "",
+          password: hash,
+          favourites: []
+        });
+
+        return newUser.save();
+      })
+      .then(() => resolve("User registered successfully."))
+      .catch((err) => {
+        if (err.code === 11000) {
+          reject("User Name already taken.");
         } else {
-
-            bcrypt.hash(userData.password, 10).then(hash => {
-
-                userData.password = hash;
-
-                let newUser = new User(userData);
-
-                newUser.save().then(() => {
-                    resolve("User " + userData.userName + " successfully registered");  
-                }).catch(err => {
-                    if (err.code == 11000) {
-                        reject("User Name already taken");
-                    } else {
-                        reject("There was an error creating the user: " + err);
-                    }
-                })
-            }).catch(err => reject(err));
+          reject("There was an error creating the user: " + err);
         }
-    });
-};
+      });
+  });
+}
 
-module.exports.checkUser = function (userData) {
-    return new Promise(function (resolve, reject) {
+// Check user login
+function checkUser(loginData) {
+  return new Promise((resolve, reject) => {
+    if (!loginData.userName || !loginData.password) {
+      reject("userName and password are required.");
+      return;
+    }
 
-        User.findOne({ userName: userData.userName })
-            .exec()
-            .then(user => {
-                bcrypt.compare(userData.password, user.password).then(res => {
-                    if (res === true) {
-                        resolve(user);
-                    } else {
-                        reject("Incorrect password for user " + userData.userName);
-                    }
-                });
-            }).catch(err => {
-                reject("Unable to find user " + userData.userName);
+    User.findOne({ userName: loginData.userName })
+      .exec()
+      .then((user) => {
+        if (!user) {
+          reject("Unable to find user.");
+        } else {
+          bcrypt
+            .compare(loginData.password, user.password)
+            .then((result) => {
+              if (result) {
+                // Return full user doc so server.js can build JWT payload
+                resolve(user);
+              } else {
+                reject("Incorrect password.");
+              }
             });
-    });
-};
-
-module.exports.getFavourites = function (id) {
-    return new Promise(function (resolve, reject) {
-
-        User.findById(id)
-            .exec()
-            .then(user => {
-                resolve(user.favourites)
-            }).catch(err => {
-                reject(`Unable to get favourites for user with id: ${id}`);
-            });
-    });
+        }
+      })
+      .catch((err) => {
+        reject("There was an error verifying the user: " + err);
+      });
+  });
 }
 
-module.exports.addFavourite = function (id, favId) {
-
-    return new Promise(function (resolve, reject) {
-
-        User.findById(id).exec().then(user => {
-            if (user.favourites.length < 50) {
-                User.findByIdAndUpdate(id,
-                    { $addToSet: { favourites: favId } },
-                    { new: true }
-                ).exec()
-                    .then(user => { resolve(user.favourites); })
-                    .catch(err => { reject(`Unable to update favourites for user with id: ${id}`); })
-            } else {
-                reject(`Unable to update favourites for user with id: ${id}`);
-            }
-
-        })
-
-    });
-
-
+function getUserById(id) {
+  return User.findById(id).exec();
 }
 
-module.exports.removeFavourite = function (id, favId) {
-    return new Promise(function (resolve, reject) {
-        User.findByIdAndUpdate(id,
-            { $pull: { favourites: favId } },
-            { new: true }
-        ).exec()
-            .then(user => {
-                resolve(user.favourites);
-            })
-            .catch(err => {
-                reject(`Unable to update favourites for user with id: ${id}`);
-            })
-    });
+// Favourites operations use JWT-authenticated user
+function getFavourites(userId) {
+  return new Promise((resolve, reject) => {
+    User.findById(userId)
+      .exec()
+      .then((user) => {
+        if (!user) {
+          reject("User not found.");
+        } else {
+          resolve(user.favourites || []);
+        }
+      })
+      .catch((err) => {
+        reject("Unable to get favourites: " + err);
+      });
+  });
 }
-import jwt from "jsonwebtoken";
 
-module.exports.issueJWT = function (user) {
-    const expiresIn = "1d";
+function addFavourite(userId, bookId) {
+  return new Promise((resolve, reject) => {
+    User.findById(userId)
+      .exec()
+      .then((user) => {
+        if (!user) {
+          reject("User not found.");
+        } else {
+          if (!user.favourites.includes(bookId)) {
+            user.favourites.push(bookId);
+          }
+          return user.save();
+        }
+      })
+      .then((user) => resolve(user.favourites))
+      .catch((err) => reject("Unable to add favourite: " + err));
+  });
+}
 
-    const payload = {
-        sub: user._id,
-        userName: user.userName
-    };
+function removeFavourite(userId, bookId) {
+  return new Promise((resolve, reject) => {
+    User.findById(userId)
+      .exec()
+      .then((user) => {
+        if (!user) {
+          reject("User not found.");
+        } else {
+          user.favourites = (user.favourites || []).filter((f) => f !== bookId);
+          return user.save();
+        }
+      })
+      .then((user) => resolve(user.favourites))
+      .catch((err) => reject("Unable to remove favourite: " + err));
+  });
+}
 
-    const signedToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
-
-    return {
-        token: "Bearer " + signedToken,
-        expires: expiresIn
-    };
-};
-
-module.exports.getUserById = function (id) {
-    return User.findById(id).exec();
+module.exports = {
+  connect,
+  registerUser,
+  checkUser,
+  getUserById,
+  getFavourites,
+  addFavourite,
+  removeFavourite
 };
