@@ -1,161 +1,126 @@
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
+import dotenv from "dotenv";
 
-let User; // Mongoose model
+dotenv.config();
 
-function connect() {
-  if (User) {
-    return Promise.resolve();
+const { MONGO_URL } = process.env;
+
+// Connect once — reuse connection
+if (!global.mongooseConn) {
+  global.mongooseConn = mongoose.connect(MONGO_URL, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  });
+}
+
+const Schema = mongoose.Schema;
+
+// USER SCHEMA
+const userSchema = new Schema({
+  userName: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  email: { type: String }
+  // favourites stored as array of work/book IDs
+  ,
+  favourites: [String]
+});
+
+let User = mongoose.models.User || mongoose.model("User", userSchema);
+
+// REGISTER USER
+async function registerUser(user) {
+  if (!user.userName || !user.password) {
+    throw new Error("userName and password are required.");
   }
 
-  return mongoose
-    .connect(process.env.MONGO_URL)
-    .then(() => {
-      const Schema = mongoose.Schema;
+  await global.mongooseConn;
 
-      const userSchema = new Schema({
-        userName: { type: String, unique: true },
-        email: String,
-        password: String,
-        favourites: [String]
-      });
+  // Check for existing user
+  const existing = await User.findOne({ userName: user.userName });
+  if (existing) throw new Error("Username already taken.");
 
-      User = mongoose.models.User || mongoose.model("User", userSchema);
-    });
-}
+  // Hash password
+  const hashedPassword = await bcrypt.hash(user.password, 10);
 
-// Register a new user
-function registerUser(userData) {
-  return new Promise((resolve, reject) => {
-    if (!userData.userName || !userData.password || !userData.password2) {
-      reject("userName, password, and password2 are all required.");
-      return;
-    }
-
-    if (userData.password !== userData.password2) {
-      reject("Passwords do not match.");
-      return;
-    }
-
-    bcrypt
-      .hash(userData.password, 10)
-      .then((hash) => {
-        const newUser = new User({
-          userName: userData.userName,
-          email: userData.email || "",
-          password: hash,
-          favourites: []
-        });
-
-        return newUser.save();
-      })
-      .then(() => resolve("User registered successfully."))
-      .catch((err) => {
-        if (err.code === 11000) {
-          reject("User Name already taken.");
-        } else {
-          reject("There was an error creating the user: " + err);
-        }
-      });
+  const newUser = new User({
+    userName: user.userName,
+    password: hashedPassword,
+    email: user.email || null,
+    favourites: []
   });
+
+  await newUser.save();
+
+  // Return only safe data
+  return {
+    userName: newUser.userName,
+    email: newUser.email
+  };
 }
 
-// Check user login
-function checkUser(loginData) {
-  return new Promise((resolve, reject) => {
-    if (!loginData.userName || !loginData.password) {
-      reject("userName and password are required.");
-      return;
-    }
+// LOGIN USER
+async function checkUser(user) {
+  if (!user.userName || !user.password) {
+    throw new Error("userName and password are required.");
+  }
 
-    User.findOne({ userName: loginData.userName })
-      .exec()
-      .then((user) => {
-        if (!user) {
-          reject("Unable to find user.");
-        } else {
-          bcrypt
-            .compare(loginData.password, user.password)
-            .then((result) => {
-              if (result) {
-                // Return full user doc so server.js can build JWT payload
-                resolve(user);
-              } else {
-                reject("Incorrect password.");
-              }
-            });
-        }
-      })
-      .catch((err) => {
-        reject("There was an error verifying the user: " + err);
-      });
-  });
+  await global.mongooseConn;
+
+  const existingUser = await User.findOne({ userName: user.userName });
+  if (!existingUser) throw new Error("Invalid username or password.");
+
+  const match = await bcrypt.compare(user.password, existingUser.password);
+  if (!match) throw new Error("Invalid username or password.");
+
+  return {
+    userName: existingUser.userName,
+    email: existingUser.email
+  };
 }
 
-function getUserById(id) {
-  return User.findById(id).exec();
+// GET FAVOURITES
+async function getFavourites(userName) {
+  await global.mongooseConn;
+
+  const user = await User.findOne({ userName });
+  if (!user) throw new Error("User not found");
+
+  return user.favourites;
 }
 
-// Favourites operations use JWT-authenticated user
-function getFavourites(userId) {
-  return new Promise((resolve, reject) => {
-    User.findById(userId)
-      .exec()
-      .then((user) => {
-        if (!user) {
-          reject("User not found.");
-        } else {
-          resolve(user.favourites || []);
-        }
-      })
-      .catch((err) => {
-        reject("Unable to get favourites: " + err);
-      });
-  });
+// ADD FAVOURITE
+async function addFavourite(userName, itemId) {
+  await global.mongooseConn;
+
+  const user = await User.findOne({ userName });
+  if (!user) throw new Error("User not found");
+
+  if (!user.favourites.includes(itemId)) {
+    user.favourites.push(itemId);
+    await user.save();
+  }
+
+  return user.favourites;
 }
 
-function addFavourite(userId, bookId) {
-  return new Promise((resolve, reject) => {
-    User.findById(userId)
-      .exec()
-      .then((user) => {
-        if (!user) {
-          reject("User not found.");
-        } else {
-          if (!user.favourites.includes(bookId)) {
-            user.favourites.push(bookId);
-          }
-          return user.save();
-        }
-      })
-      .then((user) => resolve(user.favourites))
-      .catch((err) => reject("Unable to add favourite: " + err));
-  });
+// REMOVE FAVOURITE
+async function removeFavourite(userName, itemId) {
+  await global.mongooseConn;
+
+  const user = await User.findOne({ userName });
+  if (!user) throw new Error("User not found");
+
+  user.favourites = user.favourites.filter(id => id !== itemId);
+  await user.save();
+
+  return user.favourites;
 }
 
-function removeFavourite(userId, bookId) {
-  return new Promise((resolve, reject) => {
-    User.findById(userId)
-      .exec()
-      .then((user) => {
-        if (!user) {
-          reject("User not found.");
-        } else {
-          user.favourites = (user.favourites || []).filter((f) => f !== bookId);
-          return user.save();
-        }
-      })
-      .then((user) => resolve(user.favourites))
-      .catch((err) => reject("Unable to remove favourite: " + err));
-  });
-}
-
-module.exports = {
-  connect,
+export default {
   registerUser,
   checkUser,
-  getUserById,
   getFavourites,
   addFavourite,
-  removeFavourite
+  removeFavourite,
 };
