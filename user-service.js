@@ -32,38 +32,44 @@ function connect() {
 }
 
 // REGISTER
+// Register a new user
 function registerUser(userData) {
-  return new Promise((resolve, reject) => {
-    if (!userData.userName || !userData.password || !userData.password2) {
-      reject("userName, password, and password2 are all required.");
-      return;
-    }
+  return connect().then(() => {
+    return new Promise((resolve, reject) => {
+      if (!userData.userName || !userData.password || !userData.password2) {
+        reject("userName, password, and password2 are all required.");
+        return;
+      }
 
-    if (userData.password !== userData.password2) {
-      reject("Passwords do not match.");
-      return;
-    }
+      if (userData.password !== userData.password2) {
+        reject("Passwords do not match.");
+        return;
+      }
 
-    bcrypt
-      .hash(userData.password, 10)
-      .then((hash) => {
-        const newUser = new User({
-          userName: userData.userName,
-          email: userData.email || "",
-          password: hash,
-          favourites: []
+      bcrypt
+        .hash(userData.password, 10)
+        .then((hash) => {
+          // User is guaranteed to be a constructor here
+          const newUser = new User({
+            userName: userData.userName,
+            email: userData.email || "",
+            password: hash,
+            favourites: []
+          });
+
+          return newUser.save();
+        })
+        .then(() => resolve("User registered successfully."))
+        .catch((err) => {
+          if (err.code === 11000) {
+            reject("User Name already taken.");
+          } else {
+            // Include the specific MongoDB error in the console for debugging
+            console.error("MongoDB Error:", err); 
+            reject("There was an error creating the user: " + err);
+          }
         });
-
-        return newUser.save();
-      })
-      .then(() => resolve("User registered successfully."))
-      .catch((err) => {
-        if (err.code === 11000) {
-          reject("User Name already taken.");
-        } else {
-          reject("There was an error creating the user: " + err);
-        }
-      });
+    });
   });
 }
 
