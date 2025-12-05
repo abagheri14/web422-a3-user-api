@@ -1,39 +1,32 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
-let User; // Mongoose Model
-let connectPromise = null;
+let User; // Mongoose model
 
 function connect() {
-  if (User) return Promise.resolve();
-
-  if (!connectPromise) {
-    connectPromise = mongoose
-      .connect(process.env.MONGO_URL, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true
-      })
-      .then(() => {
-        const Schema = mongoose.Schema;
-
-        const userSchema = new Schema({
-          userName: { type: String, unique: true },
-          email: String,
-          password: String,
-          favourites: [String]
-        });
-
-        // Prevent overwrite crash on Vercel
-        User = mongoose.models.User || mongoose.model("User", userSchema);
-      });
+  if (User) {
+    return Promise.resolve();
   }
 
-  return connectPromise;
+  return mongoose
+    .connect(process.env.MONGO_URL)
+    .then(() => {
+      const Schema = mongoose.Schema;
+
+      const userSchema = new Schema({
+        userName: { type: String, unique: true },
+        email: String,
+        password: String,
+        favourites: [String]
+      });
+
+      User = mongoose.models.User || mongoose.model("User", userSchema);
+    });
 }
 
-// REGISTER
 // Register a new user
 function registerUser(userData) {
+  // 🛑 FIX: Ensure connect runs before using the User model
   return connect().then(() => {
     return new Promise((resolve, reject) => {
       if (!userData.userName || !userData.password || !userData.password2) {
@@ -49,7 +42,6 @@ function registerUser(userData) {
       bcrypt
         .hash(userData.password, 10)
         .then((hash) => {
-          // User is guaranteed to be a constructor here
           const newUser = new User({
             userName: userData.userName,
             email: userData.email || "",
@@ -64,8 +56,7 @@ function registerUser(userData) {
           if (err.code === 11000) {
             reject("User Name already taken.");
           } else {
-            // Include the specific MongoDB error in the console for debugging
-            console.error("MongoDB Error:", err); 
+            console.error("MongoDB Error during registration:", err);
             reject("There was an error creating the user: " + err);
           }
         });
@@ -73,64 +64,109 @@ function registerUser(userData) {
   });
 }
 
-// LOGIN
+// Check user login
 function checkUser(loginData) {
-  return new Promise((resolve, reject) => {
-    if (!loginData.userName || !loginData.password) {
-      reject("userName and password are required.");
-      return;
-    }
+  // 🛑 FIX: Ensure connect runs before using the User model
+  return connect().then(() => {
+    return new Promise((resolve, reject) => {
+      if (!loginData.userName || !loginData.password) {
+        reject("userName and password are required.");
+        return;
+      }
 
-    User.findOne({ userName: loginData.userName })
-      .exec()
-      .then((user) => {
-        if (!user) {
-          reject("Unable to find user.");
-        } else {
-          bcrypt.compare(loginData.password, user.password).then((result) => {
-            if (result) resolve(user);
-            else reject("Incorrect password.");
-          });
-        }
-      })
-      .catch((err) =>
-        reject("There was an error verifying the user: " + err)
-      );
+      User.findOne({ userName: loginData.userName })
+        .exec()
+        .then((user) => {
+          if (!user) {
+            reject("Unable to find user.");
+          } else {
+            bcrypt
+              .compare(loginData.password, user.password)
+              .then((result) => {
+                if (result) {
+                  // Return full user doc so server.js can build JWT payload
+                  resolve(user);
+                } else {
+                  reject("Incorrect password.");
+                }
+              });
+          }
+        })
+        .catch((err) => {
+          reject("There was an error verifying the user: " + err);
+        });
+    });
   });
 }
 
-// USER LOOKUP
 function getUserById(id) {
-  return User.findById(id).exec();
+  // 🛑 FIX: Ensure connect runs before using the User model
+  return connect().then(() => {
+    return User.findById(id).exec();
+  });
 }
 
-// FAVOURITES
+// Favourites operations use JWT-authenticated user
 function getFavourites(userId) {
-  return User.findById(userId)
-    .exec()
-    .then((user) => (user ? user.favourites || [] : Promise.reject("User not found.")));
+  // 🛑 FIX: Ensure connect runs before using the User model
+  return connect().then(() => {
+    return new Promise((resolve, reject) => {
+      User.findById(userId)
+        .exec()
+        .then((user) => {
+          if (!user) {
+            reject("User not found.");
+          } else {
+            resolve(user.favourites || []);
+          }
+        })
+        .catch((err) => {
+          reject("Unable to get favourites: " + err);
+        });
+    });
+  });
 }
 
 function addFavourite(userId, bookId) {
-  return User.findById(userId)
-    .exec()
-    .then((user) => {
-      if (!user) throw "User not found.";
-      if (!user.favourites.includes(bookId)) user.favourites.push(bookId);
-      return user.save();
-    })
-    .then((user) => user.favourites);
+  // 🛑 FIX: Ensure connect runs before using the User model
+  return connect().then(() => {
+    return new Promise((resolve, reject) => {
+      User.findById(userId)
+        .exec()
+        .then((user) => {
+          if (!user) {
+            reject("User not found.");
+          } else {
+            if (!user.favourites.includes(bookId)) {
+              user.favourites.push(bookId);
+            }
+            return user.save();
+          }
+        })
+        .then((user) => resolve(user.favourites))
+        .catch((err) => reject("Unable to add favourite: " + err));
+    });
+  });
 }
 
 function removeFavourite(userId, bookId) {
-  return User.findById(userId)
-    .exec()
-    .then((user) => {
-      if (!user) throw "User not found.";
-      user.favourites = (user.favourites || []).filter((f) => f !== bookId);
-      return user.save();
-    })
-    .then((user) => user.favourites);
+  // 🛑 FIX: Ensure connect runs before using the User model
+  return connect().then(() => {
+    return new Promise((resolve, reject) => {
+      User.findById(userId)
+        .exec()
+        .then((user) => {
+          if (!user) {
+            reject("User not found.");
+          } else {
+            user.favourites = (user.favourites || []).filter((f) => f !== bookId);
+            return user.save();
+          }
+        })
+        .then((user) => resolve(user.favourites))
+        .catch((err) => reject("Unable to remove favourite: " + err));
+    });
+  });
 }
 
 module.exports = {
