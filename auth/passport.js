@@ -3,7 +3,7 @@ const ExtractJwt = require("passport-jwt").ExtractJwt;
 const userService = require("../user-service.js");
 
 const opts = {};
-opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken();
+opts.jwtFromRequest = ExtractJwt.fromAuthHeaderAsBearerToken(); 
 opts.secretOrKey = process.env.JWT_SECRET;
 
 module.exports = function (passport) {
