@@ -10,7 +10,7 @@ dotenv.config();
 const app = express();
 const HTTP_PORT = process.env.PORT || 8080;
 
-// --- CORS CONFIGURATION ---
+// --- CORS Configuration (Allows Vercel domains) ---
 const allowedOrigins = [
   "http://localhost:3000",
   "https://web422-a2-books-app.vercel.app", 
@@ -21,7 +21,6 @@ const corsOptions = {
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } 
-        // Allow any Vercel preview deployment URL for your frontend project
         else if (origin.includes('web422-a2-books') && origin.endsWith('.vercel.app')) {
             callback(null, true);
         }
