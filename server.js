@@ -10,8 +10,37 @@ dotenv.config();
 const app = express();
 const HTTP_PORT = process.env.PORT || 8080;
 
+// --- CORS Configuration Fix ---
+// This explicitly allows your local dev and the Vercel deployed frontend
+// Replace 'YOUR-FRONTEND-DEPLOYED-URL' with the actual Vercel URL of your frontend app (e.g., web422-a2-books-app-main-xyz.vercel.app).
+// NOTE: Vercel projects often generate a default URL based on the git repository name.
+const allowedOrigins = [
+  "http://localhost:3000", // For local development testing
+  "https://web422-a2-books-app-main.vercel.app" // Vercel's typical default
+  // You may need to add your specific deployed frontend URL here if the above doesn't work.
+  // Example: "https://your-frontend-project.vercel.app" 
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl) and requests from the allowed list
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            // Check if the origin matches the common pattern for Vercel preview deployments
+            if (origin.endsWith('.vercel.app') && origin.includes('web422-a2-books-app-main')) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
+};
+
 app.use(express.json());
-app.use(cors());
+app.use(cors(corsOptions)); // <-- USING THE CUSTOM OPTIONS HERE
 app.use(passport.initialize());
 
 // Initialize passport JWT strategy
@@ -34,16 +63,18 @@ app.post("/api/user/login", (req, res) => {
   userService
     .checkUser(req.body)
     .then((user) => {
-      // Build JWT payload with _id and userName (as per PDF)
+      // Build JWT payload with _id and userName (as per PDF) [cite: 47]
       const payload = {
         _id: user._id,
         userName: user.userName
       };
 
+      // Sign the payload using "jwt" with the secret from process.env.JWT_SECRET [cite: 49, 50]
       const token = jwt.sign(payload, process.env.JWT_SECRET, {
         expiresIn: "2h"
       });
 
+      // Include token as a "token" property in the returned JSON message [cite: 51]
       res.json({ message: "login successful", token });
     })
     .catch((msg) => {
@@ -68,7 +99,7 @@ app.get(
   }
 );
 
-// PUT /api/user/favourites/:id  (add favourite)
+// PUT /api/user/favourites/:id (add favourite)
 app.put(
   "/api/user/favourites/:id",
   passport.authenticate("jwt", { session: false }),
