@@ -10,29 +10,31 @@ dotenv.config();
 const app = express();
 const HTTP_PORT = process.env.PORT || 8080;
 
-// --- CORS Configuration Fix ---
-// This explicitly allows your local dev and the Vercel deployed frontend
-// Replace 'YOUR-FRONTEND-DEPLOYED-URL' with the actual Vercel URL of your frontend app (e.g., web422-a2-books-app-main-xyz.vercel.app).
-// NOTE: Vercel projects often generate a default URL based on the git repository name.
+// --- 🌐 CORRECTED CORS CONFIGURATION ---
+// This is crucial for allowing requests from your local machine, 
+// your permanent Vercel domain, and any dynamic Vercel preview domains.
+
+// Explicitly list stable origins: local dev and your main deployed domain.
 const allowedOrigins = [
-  "http://localhost:3000", // For local development testing
-  "https://web422-a2-books-app-main.vercel.app" // Vercel's typical default
-  // You may need to add your specific deployed frontend URL here if the above doesn't work.
-  // Example: "https://your-frontend-project.vercel.app" 
+  "http://localhost:3000",
+  "https://web422-a2-books-app.vercel.app", 
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps, curl) and requests from the allowed list
+        // 1. Allow if no origin is present (e.g., Postman, server-side requests)
+        // 2. Allow if the origin is in our explicit list (local, production)
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
-        } else {
-            // Check if the origin matches the common pattern for Vercel preview deployments
-            if (origin.endsWith('.vercel.app') && origin.includes('web422-a2-books-app-main')) {
-                callback(null, true);
-            } else {
-                callback(new Error('Not allowed by CORS'));
-            }
+        } 
+        // 3. Allow any Vercel preview deployment URL for your frontend project (which starts with 'web422-a2-books')
+        else if (origin.includes('web422-a2-books') && origin.endsWith('.vercel.app')) {
+            callback(null, true);
+        }
+        else {
+            // Log the blocked origin for debugging
+            console.error('CORS blocked origin:', origin);
+            callback(new Error('Not allowed by CORS'));
         }
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
@@ -40,7 +42,7 @@ const corsOptions = {
 };
 
 app.use(express.json());
-app.use(cors(corsOptions)); // <-- USING THE CUSTOM OPTIONS HERE
+app.use(cors(corsOptions)); // <-- Apply the corrected CORS options
 app.use(passport.initialize());
 
 // Initialize passport JWT strategy
@@ -63,18 +65,18 @@ app.post("/api/user/login", (req, res) => {
   userService
     .checkUser(req.body)
     .then((user) => {
-      // Build JWT payload with _id and userName (as per PDF) [cite: 47]
+      // Build JWT payload with _id and userName 
       const payload = {
         _id: user._id,
         userName: user.userName
       };
 
-      // Sign the payload using "jwt" with the secret from process.env.JWT_SECRET [cite: 49, 50]
+      // Sign the payload using "jwt" with the secret from process.env.JWT_SECRET
       const token = jwt.sign(payload, process.env.JWT_SECRET, {
         expiresIn: "2h"
       });
 
-      // Include token as a "token" property in the returned JSON message [cite: 51]
+      // Include token as a "token" property
       res.json({ message: "login successful", token });
     })
     .catch((msg) => {
